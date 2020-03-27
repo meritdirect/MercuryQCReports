@@ -1,0 +1,18 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="My" GeneratedClassName="MySettings" UseMySettingsClassName="true">
+  <Profiles />
+  <Settings>
+    <Setting Name="LogDir" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">C:\temp\</Value>
+    </Setting>
+    <Setting Name="ConnectionString" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">Data Source=thomagata;Initial Catalog=MercuryAdmin;Persist Security Info=True;Trusted_Connection=True;</Value>
+    </Setting>
+    <Setting Name="TemplateDir" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">\\thomagata\Mercury\QCReports\Templates\</Value>
+    </Setting>
+    <Setting Name="ReportDir" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">C:\temp\</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>
