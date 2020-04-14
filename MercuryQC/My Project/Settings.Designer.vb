@@ -66,7 +66,7 @@ Namespace My
         <Global.System.Configuration.ApplicationScopedSettingAttribute(),  _
          Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
          Global.System.Configuration.DefaultSettingValueAttribute("Data Source=thomagata;Initial Catalog=MercuryAdmin;Persist Security Info=True;Tru"& _ 
-            "sted_Connection=True;")>  _
+            "sted_Connection=True;Connection Timeout=30")>  _
         Public ReadOnly Property ConnectionString() As String
             Get
                 Return CType(Me("ConnectionString"),String)
@@ -84,10 +84,20 @@ Namespace My
         
         <Global.System.Configuration.ApplicationScopedSettingAttribute(),  _
          Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
-         Global.System.Configuration.DefaultSettingValueAttribute("C:\temp\")>  _
+         Global.System.Configuration.DefaultSettingValueAttribute("\\tigerwood\jungle$\MeritBase\MeritMatch\Processes\")>  _
         Public ReadOnly Property ReportDir() As String
             Get
                 Return CType(Me("ReportDir"),String)
+            End Get
+        End Property
+        
+        <Global.System.Configuration.ApplicationScopedSettingAttribute(),  _
+         Global.System.Diagnostics.DebuggerNonUserCodeAttribute(),  _
+         Global.System.Configuration.DefaultSettingValueAttribute("Data Source=tigerwood;Initial Catalog=Master;Persist Security Info=True;Trusted_C"& _ 
+            "onnection=True;Connection Timeout=30")>  _
+        Public ReadOnly Property ConnectionStringTigerwood() As String
+            Get
+                Return CType(Me("ConnectionStringTigerwood"),String)
             End Get
         End Property
     End Class

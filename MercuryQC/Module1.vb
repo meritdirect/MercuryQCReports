@@ -69,7 +69,7 @@ Module Module1
                 End If
 
                 Dim adapter As New SqlDataAdapter(CMD)
-                adapter.SelectCommand.CommandTimeout = 300
+                adapter.SelectCommand.CommandTimeout = 800
 
                 'fill the dataset
                 adapter.Fill(ds)
@@ -154,13 +154,61 @@ Module Module1
             Dim wsQC As ExcelWorksheet = pck.Workbook.Worksheets("PivotData")
             wsQC.DeleteRow(2, wsQC.Dimension.End.Row)
             Dim cmd As New SqlClient.SqlCommand
-            cmd.CommandText = "Exec MercuryAdmin.dbo.p_MailedQCReport " & clientID.ToString
-            Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionString).Tables(0)
+            ' cmd.CommandText = "Exec MercuryAdmin.dbo.p_MailedQCReport " & clientID.ToString
+            cmd.CommandText = "declare @ClientID int
+
+Set Nocount On
+Declare @Cipher varchar(100), @SQL varchar(Max)
+
+set @ClientID = #ClientID
+
+Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] where ClientID = @ClientID
+
+
+declare @MercuryProjectID int
+Set @MercuryProjectID = (
+              Select  max(MercuryProjectID)
+              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects
+              Where   ClientID = @ClientID
+              And     MercuryProjectStatus in ('A','C')
+         )
+
+Select DatasetID, CampaignID into ##DS from 
+mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Datasets D with (nolock)
+                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP
+                              On D.ClientID = MP.ClientID
+                 Where   D.ClientID          = @ClientID
+                And     MP.MercuryProjectID =@MercuryProjectID
+                And     D.DropDate Between MP.MercuryAnalysisStartDate And MercuryCutoffDate
+
+Select * into ##Mailed from tigerwood.MeritMatch.MERIT_MATCH.Mailed where DatasetID in (Select DataSetID from ##DS)
+
+
+
+
+Set @SQL = '
+Select C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date) as DropDate, I.SelectID,  SelectName, Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
+JOIN ##DS DS on I.DatasetID = DS.DatasetID 
+join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
+join (Select SelectID, MIN(SelectName) as SelectName from mrtdatamart1.[mrtMeritSharedDatamart].[OUTPUTS].[RequestSelects] Group by SelectID) RS on I.SelectID = RS.SelectID
+Left outer Join tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
+Group by C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  SelectName'
+print @SQL
+exec (@SQL)
+
+Drop table ##DS
+Drop table ##Mailed
+"
+            cmd.CommandText = cmd.CommandText.Replace("#ClientID", clientID.ToString)
+            Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionStringTigerwood).Tables(0)
                 For Each dr As DataRow In dt.Rows
                     For nCol As Integer = 0 To dt.Columns.Count - 1
                         Select Case dt.Columns(nCol).ColumnName
                             Case "Mailed"
                                 wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
+                            Case "DropDate"
+                                wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "yyyy-mm-dd"
+                                wsQC.SetValue(nRow, nCol + 1, CDate(dr.Item(nCol).ToString))
                             Case Else
                                 wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
                         End Select
@@ -192,15 +240,68 @@ Module Module1
             Dim wsQC As ExcelWorksheet = pck.Workbook.Worksheets("PivotData")
             wsQC.DeleteRow(2, wsQC.Dimension.End.Row)
             Dim cmd As New SqlClient.SqlCommand
-            cmd.CommandText = "Exec MercuryAdmin.dbo.p_CampaignMatchQCReport " & clientID.ToString
-            Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionString).Tables(0)
+            ' cmd.CommandText = "Exec MercuryAdmin.dbo.p_CampaignMatchQCReport " & clientID.ToString
+            cmd.CommandText = "declare @ClientID int
+
+Set Nocount On
+Declare @Cipher varchar(100), @SQL varchar(Max)
+
+set @ClientID = #ClientID
+
+Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] where ClientID = @ClientID
+
+
+declare @MercuryProjectID int
+Set @MercuryProjectID = (
+              Select  max(MercuryProjectID)
+              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects
+              Where   ClientID = @ClientID
+              And     MercuryProjectStatus in ('A','C')
+         )
+
+Select DatasetID, CampaignID into ##DS from 
+mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Datasets D with (nolock)
+                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP
+                              On D.ClientID = MP.ClientID
+                 Where   D.ClientID          = @ClientID
+                And     MP.MercuryProjectID =@MercuryProjectID
+                And     D.DropDate Between MP.MercuryAnalysisStartDate And MercuryCutoffDate
+
+Select * into ##Mailed from tigerwood.MeritMatch.MERIT_MATCH.Mailed where DatasetID in (Select DataSetID from ##DS)
+
+
+
+
+Set @SQL = '
+Select C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date) as DropDate, I.SelectID,  SelectName, Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
+JOIN ##DS DS on I.DatasetID = DS.DatasetID 
+join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
+join (Select SelectID, MIN(SelectName) as SelectName from mrtdatamart1.[mrtMeritSharedDatamart].[OUTPUTS].[RequestSelects] Group by SelectID) RS on I.SelectID = RS.SelectID
+Left outer Join tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
+Group by C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  SelectName'
+print @SQL
+exec (@SQL)
+
+Drop table ##DS
+Drop table ##Mailed
+"
+            cmd.CommandText = cmd.CommandText.Replace("#ClientID", clientID.ToString)
+            Dim dDollars As Double = 0.0
+            Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionStringTigerwood).Tables(0)
                 For Each dr As DataRow In dt.Rows
                     For nCol As Integer = 0 To dt.Columns.Count - 1
                         Select Case dt.Columns(nCol).ColumnName
                             Case "Mailed", "Response"
                                 wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
                             Case "ResponseDollars"
-                                wsQC.SetValue(nRow, nCol + 1, CDbl(dr.Item(nCol)))
+                                If Double.TryParse(dr.Item(nCol), dDollars) Then
+                                    wsQC.SetValue(nRow, nCol + 1, dDollars)
+                                Else
+                                    wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                End If
+                            Case "DropDate"
+                                wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "yyyy-mm-dd"
+                                wsQC.SetValue(nRow, nCol + 1, CDate(dr.Item(nCol).ToString))
                             Case Else
                                 wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
                         End Select
