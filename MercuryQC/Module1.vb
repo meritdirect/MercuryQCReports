@@ -34,22 +34,32 @@ Module Module1
             strReportType = clArgs(2)
         End If
         reportDir = My.Settings.ReportDir & GetClientName(clientID, My.Settings.ConnectionString) & "\QC\"
-        Select Case strReportType
-            Case "Element"
-                runElementReport(clientID)
-            Case "Mailed"
-                runMailedReport(clientID)
-            Case "CampaignMatch"
-                runCampaignMatchReport(clientID)
-            Case "OrderSummary"
-                runOrderSummaryReport(clientID)
-            Case "MatchLevel"
-                runMatchLevelReport(clientID)
-            Case "MailedData"
-                runMailedDataReport(clientID)
-            Case Else
+        Dim outputFile As String = String.Empty
+        Try
+            Select Case strReportType
+                Case "Element"
+                    outputFile = runElementReport(clientID)
+                Case "Mailed"
+                    outputFile = runCampaignMatchReport(clientID, 2)
+                Case "CampaignMatch"
+                    outputFile = runCampaignMatchReport(clientID, 1)
+                Case "OrderSummary"
+                    outputFile = runOrderSummaryReport(clientID)
+                Case "MatchLevel"
+                    outputFile = runMatchLevelReport(clientID)
+                Case "MailedData"
+                    outputFile = runMailedDataReport(clientID)
+                Case Else
 
-        End Select
+            End Select
+        Catch ex As Exception
+
+            LogError(ex.ToString)
+            Console.Write(ex.ToString)
+            System.Environment.Exit(1)
+        End Try
+        Console.WriteLine(outputFile)
+        System.Environment.Exit(0)
 
     End Sub
 
@@ -103,10 +113,11 @@ Module Module1
         File.AppendAllText(My.Settings.LogDir + My.Application.Info.AssemblyName + ".txt", sb.ToString() + vbCrLf)
         sb.Clear()
     End Sub
-    Private Sub runElementReport(clientID As Integer)
+    Private Function runElementReport(clientID As Integer) As String
+        Dim ret As String = String.Empty
         Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "ElementQC_Template.xlsx")
-        Try
-            Dim strDataset As String = GetCurrentDataset(clientID, My.Settings.ConnectionString)
+
+        Dim strDataset As String = GetCurrentDataset(clientID, My.Settings.ConnectionString)
             Dim i As Integer = 2
             Using pck As ExcelPackage = New ExcelPackage(fi)
                 Dim wsQC As ExcelWorksheet = pck.Workbook.Worksheets("Sheet1")
@@ -138,15 +149,15 @@ Module Module1
                 wsQC.Name = strDataset
                 Dim fiOut As FileInfo = New FileInfo(reportDir & "ElementQCReport_" & strDataset.Replace("Mercury_V4_", "") & ".xlsx")
                 pck.SaveAs(fiOut)
+                ret = fiOut.Name
             End Using
-            System.Environment.Exit(0)
-        Catch ex As Exception
-            LogError(ex.ToString)
-        End Try
-    End Sub
-    Private Sub runMailedReport(clientID As Integer)
+            Return ret
+
+    End Function
+    Private Function runMailedReport(clientID As Integer) As String
         Dim clientName As String = GetClientName(clientID, My.Settings.ConnectionString)
         Dim clientUpdate As String = GetClientUpdate(clientID, My.Settings.ConnectionString)
+        Dim ret As String = String.Empty
         clientUpdate = clientUpdate.Replace("\", "_").Replace("/", "_")
         Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "MailedQC_Template.xlsx")
         Using pck As ExcelPackage = New ExcelPackage(fi)
@@ -156,48 +167,59 @@ Module Module1
             Dim cmd As New SqlClient.SqlCommand
             ' cmd.CommandText = "Exec MercuryAdmin.dbo.p_MailedQCReport " & clientID.ToString
             cmd.CommandText = "declare @ClientID int
-
-Set Nocount On
+SET NOCOUNT ON
 Declare @Cipher varchar(100), @SQL varchar(Max)
 
 set @ClientID = #ClientID
 
-Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] where ClientID = @ClientID
+Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] with (NOLOCK) where ClientID = @ClientID
 
 
 declare @MercuryProjectID int
 Set @MercuryProjectID = (
               Select  max(MercuryProjectID)
-              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects
+              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects with (NOLOCK)
               Where   ClientID = @ClientID
               And     MercuryProjectStatus in ('A','C')
          )
 
 Select DatasetID, CampaignID into ##DS from 
 mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Datasets D with (nolock)
-                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP
+                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP with (NOLOCK)
                               On D.ClientID = MP.ClientID
                  Where   D.ClientID          = @ClientID
                 And     MP.MercuryProjectID =@MercuryProjectID
                 And     D.DropDate Between MP.MercuryAnalysisStartDate And MercuryCutoffDate
 
-Select * into ##Mailed from tigerwood.MeritMatch.MERIT_MATCH.Mailed where DatasetID in (Select DataSetID from ##DS)
+Select * into ##Mailed from tigerwood.MeritMatch.MERIT_MATCH.Mailed with (NOLOCK) where DatasetID in (Select DataSetID from ##DS)
 
 
+Select  SelectID       = L.ListID,
+             SelectName = I.ItemName + ' (Select ' + RTrim(Cast(L.ListID As VarChar)) + ')'
+     into ##Selects
+     From    mrtDD.mrtMyMDB.dbo.Lists L With (NoLock)
+             Inner Join mrtDD.mrtMyMDB.dbo.Items I With (NoLock)
+                  On L.ItemID = I.ItemID
+	where L.ListID in (Select distinct(SelectID) from ##Mailed)
 
+Select CampaignID, CampaignName, DropDateFirst into ##Campaigns from mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) where CampaignID in (Select distinct(CampaignID) from ##Mailed)
 
 Set @SQL = '
-Select C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date) as DropDate, I.SelectID,  SelectName, Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
-JOIN ##DS DS on I.DatasetID = DS.DatasetID 
-join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
-join (Select SelectID, MIN(SelectName) as SelectName from mrtdatamart1.[mrtMeritSharedDatamart].[OUTPUTS].[RequestSelects] Group by SelectID) RS on I.SelectID = RS.SelectID
-Left outer Join tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
-Group by C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  SelectName'
+SELECT C.CampaignID, C.CampaignName,  I.SelectID,   Cast(C.DropDateFirst as Date) as DropDate,
+IsNull(SelectName,''UNASSIGNED'') as SelectName, 
+Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
+JOIN ##DS DS on I.DatasetID = DS.DatasetID
+JOIN ##Selects S on I.SelectID = S.SelectID
+JOIN ##Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
+LEFT OUTER JOIN tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
+GROUP BY C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  IsNull(SelectName,''UNASSIGNED'')'
 print @SQL
-exec (@SQL)
+EXEC (@SQL)
 
-Drop table ##DS
-Drop table ##Mailed
+DROP TABLE IF EXISTS ##DS
+DROP TABLE IF EXISTS ##Mailed
+DROP TABLE IF EXISTS ##Selects
+DROP TABLE IF EXISTS ##Campaigns
 "
             cmd.CommandText = cmd.CommandText.Replace("#ClientID", clientID.ToString)
             Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionStringTigerwood).Tables(0)
@@ -226,84 +248,119 @@ Drop table ##Mailed
 
             Dim fiOut As FileInfo = New FileInfo(reportDir & "MailedQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
             pck.SaveAs(fiOut)
+            ret = fiOut.Name
         End Using
+        Return ret
 
-
-    End Sub
-    Private Sub runCampaignMatchReport(clientID As Integer)
+    End Function
+    Private Function runCampaignMatchReport(clientID As Integer, nType As Integer) As String
         Dim clientName As String = GetClientName(clientID, My.Settings.ConnectionString)
         Dim clientUpdate As String = GetClientUpdate(clientID, My.Settings.ConnectionString)
+        Dim fi As FileInfo
+        Dim ret As String = String.Empty
         clientUpdate = clientUpdate.Replace("\", "_").Replace("/", "_")
-        Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "CampaignMatchQC_Template.xlsx")
+        Select Case nType
+            Case 1
+                fi = New FileInfo(My.Settings.TemplateDir & "CampaignMatchQC_Template.xlsx")
+            Case 2
+                fi = New FileInfo(My.Settings.TemplateDir & "MailedQC_Template.xlsx")
+            Case Else
+                Return ""
+        End Select
+
+
         Using pck As ExcelPackage = New ExcelPackage(fi)
             Dim nRow As Integer = 2
             Dim wsQC As ExcelWorksheet = pck.Workbook.Worksheets("PivotData")
             wsQC.DeleteRow(2, wsQC.Dimension.End.Row)
             Dim cmd As New SqlClient.SqlCommand
             ' cmd.CommandText = "Exec MercuryAdmin.dbo.p_CampaignMatchQCReport " & clientID.ToString
-            cmd.CommandText = "declare @ClientID int
-
-Set Nocount On
-Declare @Cipher varchar(100), @SQL varchar(Max)
+            cmd.CommandText = "Declare @Cipher varchar(100), @SQL varchar(Max), @ClientID int
 
 set @ClientID = #ClientID
 
-Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] where ClientID = @ClientID
+Select @Cipher =Cipher  from mrtDatamart1.[mrtMeritSharedDatamart].[MERIT_MATCH].[Clients] with (NOLOCK) where ClientID = @ClientID
 
 
 declare @MercuryProjectID int
 Set @MercuryProjectID = (
               Select  max(MercuryProjectID)
-              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects
+              From    mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects with (NOLOCK)
               Where   ClientID = @ClientID
               And     MercuryProjectStatus in ('A','C')
          )
 
 Select DatasetID, CampaignID into ##DS from 
 mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Datasets D with (nolock)
-                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP
+                         Inner Join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.MercuryProjects MP with (NOLOCK)
                               On D.ClientID = MP.ClientID
                  Where   D.ClientID          = @ClientID
                 And     MP.MercuryProjectID =@MercuryProjectID
                 And     D.DropDate Between MP.MercuryAnalysisStartDate And MercuryCutoffDate
 
-Select * into ##Mailed from tigerwood.MeritMatch.MERIT_MATCH.Mailed where DatasetID in (Select DataSetID from ##DS)
 
+Select @SQL = 'Select * into ##Mailed from tigerwood.MERITMATCHWork.' + @Cipher + '.Mailed with (NOLOCK) where DatasetID in (Select DataSetID from ##DS)'
+EXEC (@SQL)
 
+Select  SelectID       = L.ListID,
+             SelectName = I.ItemName + ' (Select ' + RTrim(Cast(L.ListID As VarChar)) + ')'
+     into ##Selects
+     From    mrtDD.mrtMyMDB.dbo.Lists L With (NoLock)
+             Inner Join mrtDD.mrtMyMDB.dbo.Items I With (NoLock)
+                  On L.ItemID = I.ItemID
+	where L.ListID in (Select distinct(SelectID) from ##Mailed)
 
+Select CampaignID, CampaignName, DropDateFirst into ##Campaigns from mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) where CampaignID in (Select distinct(CampaignID) from ##Mailed)
 
 Set @SQL = '
-Select C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date) as DropDate, I.SelectID,  SelectName, Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
-JOIN ##DS DS on I.DatasetID = DS.DatasetID 
-join mrtDatamart1.mrtMeritSharedDatamart.MERIT_MATCH.Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
-join (Select SelectID, MIN(SelectName) as SelectName from mrtdatamart1.[mrtMeritSharedDatamart].[OUTPUTS].[RequestSelects] Group by SelectID) RS on I.SelectID = RS.SelectID
-Left outer Join tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
-Group by C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  SelectName'
+SELECT C.CampaignID, C.CampaignName,  I.SelectID,   Cast(C.DropDateFirst as Date) as DropDate,
+IsNull(SelectName,''UNASSIGNED'') as SelectName, 
+Count(distinct I.MailedID) as Mailed, count(Distinct R.OrderNo) as Response, sum(R.OrderAmount) as ResponseDollars from ##Mailed I 
+JOIN ##DS DS on I.DatasetID = DS.DatasetID
+JOIN ##Selects S on I.SelectID = S.SelectID
+JOIN ##Campaigns C with (nolock) on DS.CampaignID = C.CampaignID
+LEFT OUTER JOIN tigerwood.MeritMatch.' + @Cipher + '.Responders R with (nolock) on I.MailedID = R.MailedID
+GROUP BY C.CampaignID, C.CampaignName, Cast(C.DropDateFirst as Date), I.SelectID,  IsNull(SelectName,''UNASSIGNED'')'
 print @SQL
-exec (@SQL)
+EXEC (@SQL)
 
-Drop table ##DS
-Drop table ##Mailed
+DROP TABLE IF EXISTS ##DS
+DROP TABLE IF EXISTS ##Mailed
+DROP TABLE IF EXISTS ##Selects
+DROP TABLE IF EXISTS ##Campaigns
 "
             cmd.CommandText = cmd.CommandText.Replace("#ClientID", clientID.ToString)
             Dim dDollars As Double = 0.0
             Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionStringTigerwood).Tables(0)
                 For Each dr As DataRow In dt.Rows
                     For nCol As Integer = 0 To dt.Columns.Count - 1
-                        Select Case dt.Columns(nCol).ColumnName
-                            Case "Mailed", "Response"
-                                wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
-                            Case "ResponseDollars"
-                                If Double.TryParse(dr.Item(nCol), dDollars) Then
-                                    wsQC.SetValue(nRow, nCol + 1, dDollars)
-                                Else
-                                    wsQC.SetValue(nRow, nCol + 1, 0.0)
-                                End If
-                            Case "DropDate"
-                                wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "yyyy-mm-dd"
-                                wsQC.SetValue(nRow, nCol + 1, CDate(dr.Item(nCol).ToString))
-                            Case Else
-                                wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
+                        Select Case nType
+                            Case 1
+                                Select Case dt.Columns(nCol).ColumnName
+                                    Case "Mailed", "Response"
+                                        wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
+                                    Case "ResponseDollars"
+                                        If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                            wsQC.SetValue(nRow, nCol + 1, dDollars)
+                                        Else
+                                            wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                        End If
+                                    Case "DropDate"
+                                        wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "yyyy-mm-dd"
+                                        wsQC.SetValue(nRow, nCol + 1, CDate(dr.Item(nCol).ToString))
+                                    Case Else
+                                        wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
+                                End Select
+                            Case 2
+                                Select Case dt.Columns(nCol).ColumnName
+                                    Case "Mailed"
+                                        wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
+                                    Case "DropDate"
+                                        wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "yyyy-mm-dd"
+                                        wsQC.SetValue(nRow, nCol + 1, CDate(dr.Item(nCol).ToString))
+                                    Case Else
+                                        wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
+                                End Select
                         End Select
                     Next
                     nRow += 1
@@ -311,21 +368,24 @@ Drop table ##Mailed
 
 
             End Using
-            nRow -= 1
-            '  Dim Range = wsQC.Workbook.Names("CampaignData")
-            '  Range.Address = "A1:F" & nRow.ToString
-            '  wsQC.Workbook.Names.Remove("CampaignData")
-            ' wsQC.Workbook.Names.Add("CampaignData", Range)
+            Dim fiOut As FileInfo
+            Select Case nType
+                Case 1
+                    fiOut = New FileInfo(reportDir & "CampaignMatchQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
+                Case 2
+                    fiOut = New FileInfo(reportDir & "MailedQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
+            End Select
 
-            Dim fiOut As FileInfo = New FileInfo(reportDir & "CampaignMatchQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
             pck.SaveAs(fiOut)
+            ret = fiOut.Name
         End Using
+        Return ret
 
-
-    End Sub
-    Private Sub runOrderSummaryReport(clientID As Integer)
+    End Function
+    Private Function runOrderSummaryReport(clientID As Integer) As String
         Dim clientName As String = GetClientName(clientID, My.Settings.ConnectionString)
         Dim clientUpdate As String = GetClientUpdate(clientID, My.Settings.ConnectionString)
+        Dim ret As String = String.Empty
         clientUpdate = clientUpdate.Replace("\", "_").Replace("/", "_")
         Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "OrderSummaryQC_Template.xlsx")
         Using pck As ExcelPackage = New ExcelPackage(fi)
@@ -369,13 +429,15 @@ Drop table ##Mailed
             wsQC.Cells(wsQC.Dimension.Address).AutoFitColumns()
             Dim fiOut As FileInfo = New FileInfo(reportDir & "OrderSummaryQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
             pck.SaveAs(fiOut)
+            ret = fiOut.Name
         End Using
+        Return ret
 
-
-    End Sub
-    Private Sub runMatchLevelReport(clientID As Integer)
+    End Function
+    Private Function runMatchLevelReport(clientID As Integer) As String
         Dim clientName As String = GetClientName(clientID, My.Settings.ConnectionString)
         Dim clientUpdate As String = GetClientUpdate(clientID, My.Settings.ConnectionString)
+        Dim ret As String = String.Empty
         clientUpdate = clientUpdate.Replace("\", "_").Replace("/", "_")
         Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "MatchLevelQC_Template.xlsx")
         Using pck As ExcelPackage = New ExcelPackage(fi)
@@ -408,13 +470,15 @@ Drop table ##Mailed
             End Using
             Dim fiOut As FileInfo = New FileInfo(reportDir & "MatchLevelQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
             pck.SaveAs(fiOut)
+            ret = fiOut.Name
         End Using
+        Return ret
 
-
-    End Sub
-    Private Sub runMailedDataReport(clientID As Integer)
+    End Function
+    Private Function runMailedDataReport(clientID As Integer) As String
         Dim clientName As String = GetClientName(clientID, My.Settings.ConnectionString)
         Dim clientUpdate As String = GetClientUpdate(clientID, My.Settings.ConnectionString)
+        Dim ret As String = String.Empty
         clientUpdate = clientUpdate.Replace("\", "_").Replace("/", "_")
         Dim fi As FileInfo = New FileInfo(My.Settings.TemplateDir & "MailedDataQC_Template.xlsx")
         Using pck As ExcelPackage = New ExcelPackage(fi)
@@ -423,25 +487,53 @@ Drop table ##Mailed
             wsQC.DeleteRow(2, wsQC.Dimension.End.Row)
             Dim cmd As New SqlClient.SqlCommand
             cmd.CommandText = "Exec MercuryAdmin.dbo.p_MailedDataQCReport " & clientID.ToString
+            Dim dDollars As Double = 0.0, iInt As Integer = 0
             Using dt As DataTable = ExecuteCMD(cmd, My.Settings.ConnectionString).Tables(0)
                 For Each dr As DataRow In dt.Rows
                     If Not dr.Item(0).ToString.Contains("Sub-Total") Then 'skip SubTotals
                         For nCol As Integer = 0 To dt.Columns.Count - 2 'skip total sort
                             Select Case dt.Columns(nCol).ColumnName
-                                Case "Mailed", "Response", "Auxiliary Orders", "$/M Index", "RR Index", "AOV Index", "Aux$/Resp Index", "Aux Order/Resp Index"
-                                    wsQC.SetValue(nRow, nCol + 1, CInt(dr.Item(nCol)))
+                                Case "Mailed", "Response", "Auxiliary Orders"
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Integer.TryParse(dr.Item(nCol), iInt) Then
+                                        wsQC.SetValue(nRow, nCol + 1, iInt)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0)
+                                    End If
                                     wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "#,##0"
+                                Case "$/M Index", "RR Index", "AOV Index", "Aux$/Resp Index", "Aux Order/Resp Index"
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                        wsQC.SetValue(nRow, nCol + 1, dDollars / 100)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                    End If
+                                    wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "0.00%"
                                 Case "Response Rate"
-                                    wsQC.SetValue(nRow, nCol + 1, CDbl(dr.Item(nCol)))
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                        wsQC.SetValue(nRow, nCol + 1, dDollars / 100)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                    End If
                                     wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "0.00%"
                                 Case "Response Dollars", "$/M", "AOV", "Auxiliary Dollars", "Aux$/Response", "GM", "AdCost", "OrderProcessing", "Contribution"
-                                    wsQC.SetValue(nRow, nCol + 1, CDbl(dr.Item(nCol)))
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                        wsQC.SetValue(nRow, nCol + 1, dDollars)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                    End If
                                     wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "\$#,##0"
                                 Case "$/Piece", "Aux Orders/Response", "Con/Order"
-                                    wsQC.SetValue(nRow, nCol + 1, CDbl(dr.Item(nCol)))
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                        wsQC.SetValue(nRow, nCol + 1, dDollars)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                    End If
                                     wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "\$#,###.00"
                                 Case "Aux Orders/Response"
-                                    wsQC.SetValue(nRow, nCol + 1, CDbl(dr.Item(nCol)))
+                                    If Not IsDBNull(dr.Item(nCol)) AndAlso Double.TryParse(dr.Item(nCol), dDollars) Then
+                                        wsQC.SetValue(nRow, nCol + 1, dDollars)
+                                    Else
+                                        wsQC.SetValue(nRow, nCol + 1, 0.0)
+                                    End If
                                     wsQC.Cells(nRow, nCol + 1).Style.Numberformat.Format = "#.00"
                                 Case Else
                                     wsQC.SetValue(nRow, nCol + 1, dr.Item(nCol).ToString)
@@ -457,10 +549,11 @@ Drop table ##Mailed
             wsQC.Cells(wsQC.Dimension.Address).AutoFitColumns()
             Dim fiOut As FileInfo = New FileInfo(reportDir & "MailedDataQCReport_" & clientName & "_" & clientUpdate & ".xlsx")
             pck.SaveAs(fiOut)
+            ret = fiOut.Name
         End Using
+        Return ret
 
-
-    End Sub
+    End Function
     Private Function GetClientName(clientID As String, connectionString As String) As String
         Dim strRet As String = String.Empty
         Using conn As SqlConnection = New SqlConnection(connectionString)
